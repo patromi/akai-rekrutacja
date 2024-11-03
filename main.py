@@ -1,41 +1,67 @@
 import json
-from prettyprint import prettyprint
+from typing import Dict, List, Any
 
-with open("kategorie.json") as cat:
-    cat = json.loads(cat.read())
 
-with open("zbiór_wejściowy.json") as data:
-    data = json.loads(data.read())
+class Converter:
+    CT_TO_OUNCE: float = 0.00705479239
+    G_TO_OUNCE: float = 0.0352739619
 
-# zamiana masy na uncje
+    def __init__(self):
+        self.categories: Dict[str, Dict[str, int]] = self.load_categories("kategorie.json")
+        self.data: List[Dict[str, str]] = self.open_json("zbiór_wejściowy.json")
+        self.filtered_data: List[Dict[str, Any]] = []
 
-for i in range(len(data)):
-    masa = data[i]["Masa"]
-    masa = masa.replace(",", ".")
-    if masa[-1] == "t":
-        data[i]["Masa"] = float(masa[:-2])/141.7
-    else:
-        data[i]["Masa"] = float(masa[:-1])/28.35
+    @staticmethod
+    def open_json(file_path: str) -> Dict[str, Any]:
+        with open(file_path) as f:
+            return json.load(f)
 
-# przypisanie ceny
+    def load_categories(self, file_path: str) -> Dict[str, Dict[str, int]]:
+        categories = self.open_json(file_path)
+        category_dict: Dict[str, Dict[str, int]] = {}
 
-for i in range(len(data)):
-    data[i].update({"Cena": 0})
-    for j in range(len(cat)):
-        if data[i]["Typ"] == cat[j]["Typ"] and data[i]["Czystość"] == cat[j]["Czystość"]:
-            data[i]["Cena"] = round(data[i]["Masa"]*cat[j]["Wartość za uncję (USD)"], 2)
-            break
+        for item in categories:
+            item_type: str = item["Typ"]
+            purity: str = item["Czystość"]
+            unit_price: int = item['Wartość za uncję (USD)']
+            if item_type not in category_dict:
+                category_dict[item_type] = {}
+            category_dict[item_type][purity] = unit_price
 
-# szukanie najwyzszych cen
+        return category_dict
 
-max = [{"Cena": 0}, {"Cena": 0}, {"Cena": 0}, {"Cena": 0}, {"Cena": 0}]
+    def calc_oz(self, masa: str) -> float:
+        masa = masa.replace(",", ".")
+        if masa.endswith("ct"):
+            return float(masa[:-2]) * self.CT_TO_OUNCE
+        elif masa.endswith("g"):
+            return float(masa[:-1]) * self.G_TO_OUNCE
+        else:
+            raise ValueError(f"Unknown unit: {masa}")
 
-for i in range(len(data)):
-    for j in range(5):
-        if data[i]["Cena"] > max[j]["Cena"]:
-            max[j] = data[i]
-            break
+    def map_items(self) -> None:
+        for item in self.data:
+            purity: str = item.get("Czystość", "")
+            name: str = item.get("Typ", "")
+            unit_price: int = self.categories.get(name, {}).get(purity, 0)
 
-# printowanie odpowiedzi
+            if unit_price:
+                item["Cena"] = self.calc_oz(item["Masa"]) * unit_price
+                self.filtered_data.append(item)
 
-prettyprint(max, data[0].keys())
+    def get_top_prices(self, top_n: int = 5) -> List[Dict[str, Any]]:
+        return sorted(self.filtered_data, key=lambda x: x["Cena"], reverse=True)[:top_n]
+
+
+def pretty_print(items: List[Dict[str, Any]], fields: List[str]) -> None:
+    for item in items:
+        for field in fields:
+            print(f"{field}: {item[field]}")
+        print("###################")
+
+
+converter = Converter()
+converter.map_items()
+
+top_prices = converter.get_top_prices()
+pretty_print(top_prices, ["Typ", "Właściciel", "Czystość", "Cena"])
